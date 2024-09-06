@@ -168,3 +168,133 @@ struct ModelBiasedExponentialSearch {
         }
     }
 };
+/*-------------------------------------------------------------------------------------------*/
+
+/**
+ * Functor for performing linear search - SIMD.
+ * this function is written by YeoJin Oh
+ */
+struct LinearSearch_SIMD {
+
+    template<typename InputIt, typename T>
+    InputIt operator()(InputIt first, InputIt last, InputIt /* pred */, const T &value) {
+        const T* data = &(*first); // iterator를 배열로 넣음
+        __m512i values = _mm512_set1_epi32(value);
+        size_t n = std::distance(first, last);
+        const size_t step = 8;
+        for (size_t i = 0; i < n; i+=step){
+            __m512i vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&data[i]));
+            __mmask8 cmp_mask = _mm512_cmplt_epi64_mask(vec, values);
+            if (cmp_mask != 0) {
+                // Find the index of the first element satisfying the condition
+                size_t index = __builtin_ctz(cmp_mask);
+                return first + i + index;
+            }
+        }
+        return last;
+    }
+};
+
+/**
+ * Functor for performing model-biased linear search.
+ */
+struct ModelBiasedLinearSearch_SIMD {
+
+    template<typename InputIt, typename T>
+    InputIt operator()(InputIt first, InputIt last, InputIt pred, const T &value) {
+        InputIt runner = pred;
+        //오른쪽 탐색
+        if(*runner < value){
+            const T* data = &(*runner); // iterator를 배열로 넣음
+            __m512i values = _mm512_set1_epi32(value);
+            size_t n = std::distance(runner, last);
+            const size_t step = 8;
+            for (size_t i = 0; i < n; i+=step){
+                __m512i vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&data[i]));
+                __mmask8 cmp_mask = _mm512_cmplt_epi64_mask(vec, values);
+                if (cmp_mask != 0) {
+                    // Find the index of the first element satisfying the condition
+                    size_t index = __builtin_ctz(cmp_mask);
+                    return first + i + index;
+                }
+            }
+        return last;
+        } else{
+            const T* data = &(*first); // iterator를 배열로 넣음
+            __m512i values = _mm512_set1_epi32(value);
+            size_t n = std::distance(first, runner);
+            const size_t step = 8;
+            for (size_t i = 0; i < n; i+=step){
+                __m512i vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&data[i]));
+                __mmask8 cmp_mask = _mm512_cmplt_epi64_mask(vec, values);
+                if (cmp_mask != 0) {
+                    // Find the index of the first element satisfying the condition
+                    size_t index = __builtin_ctz(cmp_mask);
+                    return first + i + index;
+                }
+            }
+            return last;
+        }
+    }
+};
+
+// bit scan reverse algorithm
+//주어진 값 x에서 가장 오른쪽에 있는 비트의 인덱스 찾음.
+// 입력값으로 해당 값의 가장 오른쪽에 있는 비트의 인덱스 반환
+inline intptr_t bsr(size_t x) {
+    intptr_t ret = -1;
+    while (x) {
+        x >>= 1;
+        ++ret;
+    }
+    return ret;
+}
+
+/**
+ * Functor for performing binary search.
+ */
+intptr_t MINUS_ONE = -1;
+struct BinarySearch_Branchless  {
+
+    template<typename InputIt, typename T>
+    InputIt operator()(InputIt first, InputIt last, InputIt /* pred */, const T &value) {
+        size_t n = std::distance(first, last); // 전체 search 할 data의 크기 계산
+        intptr_t pos = MINUS_ONE; //
+        intptr_t logstep = bsr(n);
+        intptr_t step = intptr_t(1) << logstep;
+        while(step > 0){
+            pos = (*(first + step) < value ? pos + step : pos);
+            step >>= 1;
+        }
+        return first + (pos + 1);
+    }
+};
+
+struct ModelBiasedBinarySearch_Branchless {
+
+    template<typename InputIt, typename T>
+    InputIt operator()(InputIt first, InputIt last, InputIt pred, const T &value) {
+        if (*pred < value) {
+            size_t n = std::distance(pred, last); // 전체 search 할 data의 크기 계산
+            intptr_t pos = MINUS_ONE; //
+            intptr_t logstep = bsr(n);
+            intptr_t step = intptr_t(1) << logstep;
+            while(step > 0){
+                pos = (*(first + step) < value ? pos + step : pos);
+                step >>= 1;
+            }
+            return first + (pos + 1);
+        }
+        else{
+            size_t n = std::distance(first, pred); // 전체 search 할 data의 크기 계산
+            intptr_t pos = MINUS_ONE; //
+            intptr_t logstep = bsr(n);
+            intptr_t step = intptr_t(1) << logstep;
+            while(step > 0){
+                pos = (*(first + step) < value ? pos + step : pos);
+                step >>= 1;
+            }
+            return first + (pos + 1);
+        }
+    }
+};
