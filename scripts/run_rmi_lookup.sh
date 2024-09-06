@@ -45,7 +45,7 @@ then
 fi
 
 # Write csv header
-echo "dataset,n_keys,layer1,layer2,n_models,bounds,search,size_in_bytes,rep,n_samples,lookup_time,lookup_accu" > ${FILE_RESULTS} # Write csv header
+echo "dataset,n_keys,layer1,layer2,n_models,bounds,search,size_in_bytes,rep,n_samples,lookup_time,predict_time,search_time,lookup_accu" > ${FILE_RESULTS} # Write csv header
 
 # Run model type experiment
 for dataset in ${DATASETS};
