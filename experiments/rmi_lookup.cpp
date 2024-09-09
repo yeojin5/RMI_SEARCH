@@ -7,8 +7,7 @@
 #include "rmi/rmi.hpp"
 #include "rmi/util/fn.hpp"
 #include "rmi/util/search.hpp"
-#include <chrono>
-#include <vector>
+#include "rmi/util/perf_event.h"
 
 using key_type = uint64_t;
 using namespace std::chrono;
@@ -31,14 +30,6 @@ std::size_t s_glob; ///< global size_t variable
  * @param bound_type used by the RMI
  * @param search used by the RMI for correction prediction errors
  */
-typedef std::chrono::nanoseconds nano;
-typedef std::chrono::time_point<std::chrono::system_clock> tp;
-
-struct Point{
-	private:
-	tp start, end;
-};
-
 template<typename Key, typename Rmi, typename Search>
 void experiment(const std::vector<key_type> &keys,
                 const std::size_t n_models,
@@ -50,51 +41,56 @@ void experiment(const std::vector<key_type> &keys,
                 const std::string bound_type,
                 const std::string search)
 {
+
     using rmi_type = Rmi;
     auto search_fn = Search();
 
     // Build RMI.
     rmi_type rmi(keys, n_models);
 
-	nano predict{0};
-	nano search{0};
-	std::vector<Point> predicts;
-	std::vector<Point> searchs;
-
     // Perform n_reps runs.
-    for (std::size_t rep = 0; rep != n_reps; ++rep) {
-
+    for (std::size_t rep = 0; rep != n_reps; ++rep)
+    {
         // Lookup time.
-        std::size_t lookup_accu = 0;
+        // int searchbound;
+        std::size_t lookup_accu = 2;
         auto start = steady_clock::now();
-        for (std::size_t i = 0; i != samples.size(); ++i) {
+        // //perf 시작
+        // int perf_no_ = 3;
+        // int corr_fd = setup_perf_event(perf_no_);
+        auto predict_time = 0;
+        auto search_time = 0;
+
+        for (std::size_t i = 0; i != samples.size(); ++i)
+        {
+
             auto key = samples.at(i);
-			auto pred = Point();
-			pred.start = std::chrono::system_clock::now();
+
+            auto predict_start = steady_clock::now();
             auto range = rmi.search(key);
-			pred.end = std::chrono::system_clock::now();
-			auto sea = Point();
-			sea.start = std::chrono::system_clock::now();
+            auto predict_end = steady_clock::now();
+            predict_time += duration_cast<nanoseconds>(predict_start - predict_end).count();
+
+            // searchbound= (keys.begin() + range.hi) - (keys.begin() + range.lo);
+
+            //                enable_perf_event(corr_fd);
+            auto search_start = steady_clock::now();
             auto pos = search_fn(keys.begin() + range.lo, keys.begin() + range.hi, keys.begin() + range.pos, key);
-			sea.end = std::chrono::system_clock::now();
-			predicts.push_back(pred);
-			searchs.push_back(sea);
+            auto search_end = steady_clock::now();
+            search_time += duration_cast<nanoseconds>(search_start - search_end).count();
+            //                disable_perf_event(corr_fd);
+
             lookup_accu += std::distance(keys.begin(), pos);
         }
-		while(!predicts.empty()){
-			Point& last_point = predicts.back();
-			predict += std::chrono::duration_cast<nano>(last_point.end - last_point.start);
-}
-		while(!searchs.empty()){
-			Point& last_point = searchs.back();
-			search += std::chrono::duration_cast<nano>(last_point.end - last_point.start);
-}
+        long long result;
+        //            result = close_perf_event(corr_fd);
+        // perf 끝
         auto stop = steady_clock::now();
         auto lookup_time = duration_cast<nanoseconds>(stop - start).count();
         s_glob = lookup_accu;
 
         // Report results.
-                  // Dataset
+        // Dataset
         std::cout << dataset_name << ','
                   << keys.size() << ','
                   // Index
@@ -109,13 +105,16 @@ void experiment(const std::vector<key_type> &keys,
                   << samples.size() << ','
                   // Results
                   << lookup_time << ','
-				  << predict.count() << ','
-				  << search.count() <<','		
                   // Checksums
-                  << lookup_accu << std::endl;
-    } // reps
+                  << lookup_accu << ','
+                  // performance counter
+                  //                    << perf_no_<< ','
+                  //                    << result
+                  << predict_time << ','
+                  << search_time
+                  << std::endl;
+    }
 }
-
 
 /**
  * @brief experiment function pointer
@@ -159,6 +158,11 @@ struct ConfigCompare {
     { {#L1, #L2, "lind", "binary"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, BinarySearch> }, \
     { {#L1, #L2, "gabs", "binary"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, BinarySearch> }, \
     { {#L1, #L2, "gind", "binary"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, BinarySearch> }, \
+    { {#L1, #L2, "none", "binary_branchless"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
+    { {#L1, #L2, "lind", "binary_branchless"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
+    { {#L1, #L2, "gabs", "binary_branchless"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
+    { {#L1, #L2, "gind", "binary_branchless"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
+    { {#L1, #L2, "labs", "binary_branchless"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
     { {#L1, #L2, "none", "model_biased_binary"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, ModelBiasedBinarySearch> }, \
     { {#L1, #L2, "labs", "model_biased_binary"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, ModelBiasedBinarySearch> }, \
     { {#L1, #L2, "lind", "model_biased_binary"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, ModelBiasedBinarySearch> }, \
@@ -184,39 +188,37 @@ struct ConfigCompare {
     { {#L1, #L2, "lind", "model_biased_exponential"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, ModelBiasedExponentialSearch> }, \
     { {#L1, #L2, "gabs", "model_biased_exponential"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, ModelBiasedExponentialSearch> }, \
     { {#L1, #L2, "gind", "model_biased_exponential"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, ModelBiasedExponentialSearch> }, \
-    { {#L1, #L2, "none", "LinearSearch_SIMD"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
-    { {#L1, #L2, "labs", "LinearSearch_SIMD"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
-    { {#L1, #L2, "lind", "LinearSearch_SIMD"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
-    { {#L1, #L2, "gabs", "LinearSearch_SIMD"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
-    { {#L1, #L2, "gind", "LinearSearch_SIMD"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
-    { {#L1, #L2, "none", "ModelBiasedLinearSearch_SIMD"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
-    { {#L1, #L2, "labs", "ModelBiasedLinearSearch_SIMD"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
-    { {#L1, #L2, "lind", "ModelBiasedLinearSearch_SIMD"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
-    { {#L1, #L2, "gabs", "ModelBiasedLinearSearch_SIMD"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
-    { {#L1, #L2, "gind", "ModelBiasedLinearSearch_SIMD"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
-    { {#L1, #L2, "none", "BinarySearch_Branchless"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
-    { {#L1, #L2, "labs", "BinarySearch_Branchless"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
-    { {#L1, #L2, "lind", "BinarySearch_Branchless"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
-    { {#L1, #L2, "gabs", "BinarySearch_Branchless"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
-    { {#L1, #L2, "gind", "BinarySearch_Branchless"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, BinarySearch_Branchless> }, \
-    { {#L1, #L2, "none", "ModelBiasedBinarySearch_Branchless"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
-    { {#L1, #L2, "labs", "ModelBiasedBinarySearch_Branchless"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
-    { {#L1, #L2, "lind", "ModelBiasedBinarySearch_Branchless"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
-    { {#L1, #L2, "gabs", "ModelBiasedBinarySearch_Branchless"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
-    { {#L1, #L2, "gind", "ModelBiasedBinarySearch_Branchless"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
+    { {#L1, #L2, "none", "linear_simd"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
+    { {#L1, #L2, "labs", "linear_simd"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
+    { {#L1, #L2, "lind", "linear_simd"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
+    { {#L1, #L2, "gabs", "linear_simd"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
+    { {#L1, #L2, "gind", "linear_simd"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, LinearSearch_SIMD> }, \
+    { {#L1, #L2, "none", "model_biased_linear_simd"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
+    { {#L1, #L2, "labs", "model_biased_linear_simd"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
+    { {#L1, #L2, "lind", "model_biased_linear_simd"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
+    { {#L1, #L2, "gabs", "model_biased_linear_simd"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
+    { {#L1, #L2, "gind", "model_biased_linear_simd"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, ModelBiasedLinearSearch_SIMD> }, \
+    { {#L1, #L2, "none", "model_biased_binary_branchless"}, &experiment<key_type, rmi::Rmi<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
+    { {#L1, #L2, "labs", "model_biased_binary_branchless"}, &experiment<key_type, rmi::RmiLAbs<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
+    { {#L1, #L2, "lind", "model_biased_binary_branchless"}, &experiment<key_type, rmi::RmiLInd<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
+    { {#L1, #L2, "gabs", "model_biased_binary_branchless"}, &experiment<key_type, rmi::RmiGAbs<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
+    { {#L1, #L2, "gind", "model_biased_binary_branchless"}, &experiment<key_type, rmi::RmiGInd<key_type, LT1, LT2>, ModelBiasedBinarySearch_Branchless> }, \
+    
+    
+
 
 static std::map<Config, exp_fn_ptr, ConfigCompare> exp_map {
-//    ENTRIES(linear_regression, linear_regression, rmi::LinearRegression, rmi::LinearRegression)
-//    ENTRIES(linear_regression, linear_spline,     rmi::LinearRegression, rmi::LinearSpline)
+    // ENTRIES(linear_regression, linear_regression, rmi::LinearRegression, rmi::LinearRegression)
+    // ENTRIES(linear_regression, linear_spline,     rmi::LinearRegression, rmi::LinearSpline)
     ENTRIES(linear_spline,     linear_regression, rmi::LinearSpline,     rmi::LinearRegression)
-//    ENTRIES(linear_spline,     linear_spline,     rmi::LinearSpline,     rmi::LinearSpline)
-//    ENTRIES(cubic_spline,      linear_regression, rmi::CubicSpline,      rmi::LinearRegression)
-//    ENTRIES(cubic_spline,      linear_spline,     rmi::CubicSpline,      rmi::LinearSpline)
-//    ENTRIES(radix,             linear_regression, rmi::Radix<key_type>,  rmi::LinearRegression)
-//    ENTRIES(radix,             linear_spline,     rmi::Radix<key_type>,  rmi::LinearSpline)
+    // ENTRIES(linear_spline,     linear_spline,     rmi::LinearSpline,     rmi::LinearSpline)
+    // ENTRIES(cubic_spline,      linear_regression, rmi::CubicSpline,      rmi::LinearRegression)
+    // ENTRIES(cubic_spline,      linear_spline,     rmi::CubicSpline,      rmi::LinearSpline)
+    // ENTRIES(radix,             linear_regression, rmi::Radix<key_type>,  rmi::LinearRegression)
+    // ENTRIES(radix,             linear_spline,     rmi::Radix<key_type>,  rmi::LinearSpline)
 }; ///< Map that assigns an experiment function pointer to RMI configurations.
-#undef ENTRIES
 
+#undef ENTRIES
 
 /**
  * Triggers measurement of lookup times for an RMI configuration provided via command line arguments.
@@ -316,8 +318,6 @@ int main(int argc, char *argv[])
                   << "rep,"
                   << "n_samples,"
                   << "lookup_time,"
-                  << "predict_time,"
-                  << "search_time,"
                   << "lookup_accu,"
                   << std::endl;
 
